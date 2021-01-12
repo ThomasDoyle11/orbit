@@ -1,5 +1,19 @@
 # Scripts
 
-At present, the game is extremely barebones. The player clicks to leave the orbit of a _Celestial Body_ and reattaches to the next orbit it enters. There are no win or loss conditions.
+At present, the game is extremely barebones. The player clicks to leave the orbit of a _Celestial Body_ and reattaches to the next orbit it enters. There are no win or loss conditions, or scoring mechanisms.
 
-The _CometBehaviour.cs_ script governs the behaviour of the 'comet'
+## CometBehaviour.cs
+
+This script governs the behaviour of the 'comet' which the player controls. It listens for player input, and accepts a single click/tap to disconnect from the current orbit. Two other inputs are also accepted for debug purpose, one of which returns the comet to the starting location and one of which switches the orbit between clockwise and anticlockwise.
+
+Although Unity has it's own physics system which can be used to detect collisions, I opted to use my own mathematical calculations to check when a comet enters an orbit, as it was a rather simple task and kept the detections lightweight (and it's always fun writing your own logic).
+
+The script also makes use of the singleton pattern. In the `Awake()` function, which is called when a script is loaded, it assigns a reference to this script to a static field `instance`, allowing it to be accessed from any other script. The code also checks that if another script of the same type tries to load, it is destroyed, to ensure uniqueness.
+
+## _CelestialBody.cs
+
+This script is used to define the objects which the comet shall orbit. The script contains variables that define both the way it acts and the way it looks (some of these variables, such as `explosionRadius`, have not yet had their corresponding logic implemented).
+
+The variables which define the way an object acts give variety to the gameplay. For example, the `orbitRadius` can be changed to give different radii in which the player orbits, and if this value is 0 it represents an object that cannot be orbited. Regardless of this value, if an object has a `destructionFactor` greater than 0 then it will eventually be destroyed, meaning it can no longer be orbited and will eject the player if currently being orbited. If an object also has an `explosionRadius` greater than 0, then it will cause an explosion destroying everything in this radius on destruction, prompting the player to hightail it outta there. Finally, the `gravityFactor` being greater than 0 will cause the comet to be drawn towards the object, and less than 0 will slowly move it away.
+
+By customising the `coreObject` variable, the core of the object can be made to look like different celestial objects. For example, a planet-looking object would lend itself to having a stable orbit, whereas a sun-like object may lend itself to being destroyed and exploding à la a supernova, and a black hole might draw the comet in. As well as this, a set of `planetRings` can be defined, giving more variety to the Celestial Objects.
