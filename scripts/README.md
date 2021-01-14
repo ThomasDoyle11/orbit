@@ -18,7 +18,7 @@ This script is used to define the objects which the comet shall orbit. The scrip
 
 The variables which define the way an object acts give variety to the gameplay. For example, the `orbitRadius` can be changed to give different radii in which the player orbits, and if this value is 0 it represents an object that cannot be orbited. Regardless of this value, if an object has a `destructionFactor` greater than 0 then it will eventually be destroyed, meaning it can no longer be orbited and will eject the player if currently being orbited. If an object also has an `explosionRadius` greater than 0, then it will cause an explosion destroying everything in this radius on destruction, prompting the player to hightail it outta there. Finally, the `gravityFactor` being greater than 0 will cause the comet to be drawn towards the object, and less than 0 will slowly move it away.
 
-By customising the `coreObject` variable, the core of the object can be made to look like different celestial objects. For example, a planet-looking object would lend itself to having a stable orbit, whereas a sun-like object may lend itself to being destroyed and exploding à la a supernova, and a black hole might draw the comet in. As well as this, a set of `planetRings` can be defined, giving more variety to the Celestial Bodies.
+By customising the `coreObject` variable, the core of the object can be made to look like different Celestial Bodies. For example, a planet-looking object would lend itself to having a stable orbit, whereas a sun-like object may lend itself to being destroyed and exploding à la a supernova, and a black hole might draw the comet in. As well as this, a set of `planetRings` can be defined, giving more variety to the Celestial Bodies.
 
 ## Grid.cs
 
