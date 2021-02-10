@@ -1,81 +1,98 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using System.Linq;
 
-public class Grid
+public class MyGrid
 {
-    public static List<Grid> allGrids = new List<Grid>();
-    public static float minMult = 0.1f;
-    public static float maxMult = 0.5f;
-    public static int maxGenAttempts = 20;
+    public static List<MyGrid> allGrids = new List<MyGrid>();
+    public static List<Vector2Int> gridsInSceneIDs = new List<Vector2Int>();
+
+    public static int maxGenAttempts = 50;
     public static int maxCelestialBodys = 20;
     public static float celestialBodyBuffer = 5;
-    // public static Vector2 size = new Vector2(40, 40);
-    public static Vector2 size = new Vector2(16f * 40f / 9f, 40);
+    public static int maxBlackHoles = 1;
+    private static bool isFirstBody = true;
+    public static Vector2 size
+    {
+        get
+        {
+            return GameController.instance.gridSize;
+        }
+    }
+    public static Vector2Int startID
+    {
+        get 
+        {
+            return GameController.instance.startID;
+        }
+    }
 
     public Vector2Int id;
+    public Vector2Int nextID;
     public List<CelestialBody> celestialBodys = new List<CelestialBody>();
-    public float minCelestialBodySize;
-    public float maxCelestialBodySize;
-    public GameObject gridObject;
+    private GameObject gridObject;
+    public Transform celestialBodysObject
+    {
+        get
+        {
+            return gridObject.transform.Find("CelestialBodys");
+        }
+    }
 
     public int numStars;
+    public int numBlackHoles;
 
-    public Grid(Vector2Int id)
+    private System.Random sysRand;
+
+    public static bool coroutinesRunning
     {
-        this.id = id;
-        allGrids.Add(this);
-        float minMaxRef = Mathf.Min(size.x, size.y);
-        minCelestialBodySize = minMaxRef * minMult / 2;
-        maxCelestialBodySize = minMaxRef * maxMult / 2;
-
-        gridObject = Object.Instantiate(GameController.instance.gridPrefab, GameController.instance.grids.transform);
-        gridObject.name = "Grid " + id;
-        gridObject.transform.position = new Vector3(GetGridCentre(this).x, 0, GetGridCentre(this).y);
-
-        // Add the stars background
-        numStars = Random.Range(10, 100);
-        for (int i = 0; i < numStars; i++)
+        get
         {
-            GameObject newStar = Object.Instantiate(GameController.instance.starPrefab, gridObject.transform.position + new Vector3(Random.Range(-size.x / 2, size.x / 2), 0, Random.Range(-size.y / 2, size.y / 2)), Quaternion.Euler(90, 0, 0), gridObject.transform.Find("Stars"));
-            newStar.GetComponent<MeshRenderer>().material.SetFloat("seed", Random.Range(0f,1000f));
+            return GameController.instance.coroutinesRunning;
         }
-
-        // Optionally add some nebulae
-        int rand = Random.Range(0, 4);
-        Vector3 nebulaPosition = gridObject.transform.position + new Vector3(Random.Range(-size.x / 2, size.x / 2), 0, Random.Range(-size.y / 2, size.y / 2));
-        for (int i = 0; i < rand; i++)
+        set
         {
-            nebulaPosition -= new Vector3(0, 0.01f, 0);
-            GameObject nebulae = Object.Instantiate(GameController.instance.nebulaCloud, nebulaPosition, Quaternion.Euler(90, 0, Random.Range(0, 360)), gridObject.transform.Find("Nebulae"));
-            nebulae.transform.localScale = new Vector3(40, 40);
-            Material nebulaeMat = nebulae.GetComponent<MeshRenderer>().material;
-            nebulaeMat.SetFloat("seed", Random.Range(0f, 10000f));
-            nebulaeMat.SetFloat("brightness", Random.Range(0f, 1f));
-            nebulaeMat.SetColor("colour", Random.ColorHSV(0f, 1f, 0.5f, 1f, 1f, 1f));
-            nebulaeMat.SetTexture("cloudTexture", GameController.instance.cloudTexture);
-            //nebulaeMat.SetTexture();
+            GameController.instance.coroutinesRunning = value;
         }
+    }
 
-        // Add the black background
-        Object.Instantiate(GameController.instance.blackBackground, gridObject.transform);
+    public static bool waitingToRemoveBody = false;
+    public static bool waitingToCreateGrid = false;
 
-        // GenerateGridMesh();
+    public bool isActiveInScene { get; private set; }
 
-        // Set necessary params if this is the first Grid
-        if (id == new Vector2Int(0, 0))
+    private MyGrid(Vector2Int id)
+    {
+        if (!GridExists(id))
         {
-            AddFirstCelestialBody();
-        }
+            // Create unique seed from Grid reference using Signed Cantor method
+            int a = id.x >= 0 ? 2 * id.x : -2 * id.x - 1;
+            int b = id.y >= 0 ? 2 * id.y : -2 * id.y - 1;
+            int seed = (a + b) * (a + b + 1) / 2 + b;
+            // Debug.Log(seed);
+            sysRand = new System.Random(seed);
 
-        GenerateCelestialBodys();
+            numBlackHoles = 0;
+
+            isActiveInScene = false;
+            this.id = id;
+            nextID = new Vector2Int(sysRand.Next(-GameController.instance.maxID, GameController.instance.maxID), sysRand.Next(-GameController.instance.maxID, GameController.instance.maxID));
+            allGrids.Add(this);
+
+            GenerateCelestialBodys();
+        }
+        else
+        {
+            Debug.Log("Grid data already exists.");
+        }
     }
 
     // Returns the Grid and all adjacent Grids (including diagonals)
-    public static List<Grid> GetSurroundingGrids(Vector2Int id)
+    public List<MyGrid> GetSurroundingGrids()
     {
-        List<Grid> returnGrids = new List<Grid>();
+        List<MyGrid> returnGrids = new List<MyGrid>();
         List<Vector2Int> returnGridIDs = new List<Vector2Int>();
         // Get a list of all IDs of surrounding Grids
         for (int i = -1; i <= 1; i++)
@@ -97,13 +114,13 @@ public class Grid
 
         return returnGrids;
     }
-    public static List<Grid> GetSurroundingGrids(Grid grid)
+    public List<MyGrid> GetSurroundingGrids(Vector2Int id)
     {
-        return GetSurroundingGrids(grid.id);
+        return GetGrid(id).GetSurroundingGrids();
     }
 
     // Get the Grid at the given coordinates
-    public static Grid GetGrid(Vector2Int id)
+    public static MyGrid GetGrid(Vector2Int id)
     {
         for (int i = 0; i < allGrids.Count; i++) 
         {
@@ -112,11 +129,12 @@ public class Grid
                 return allGrids[i];
             }
         }
+        Debug.Log("No such Grid: " + id);
         return null;
     }
 
     // Get the Grid which contains the given Vector2 position
-    public static Grid GetGrid(Vector2 position)
+    public static MyGrid GetGrid(Vector2 position)
     {
         return GetGrid(GetGridCoords(position));
     }
@@ -124,24 +142,24 @@ public class Grid
     // Get the coordinates of the Grid which contains the given Vector2 position
     public static Vector2Int GetGridCoords(Vector2 position)
     {
-        int idX = Mathf.RoundToInt(position.x / size.x);
-        int idY = Mathf.RoundToInt(position.y / size.y);
+        int idX = Mathf.RoundToInt(position.x / size.x) + startID.x;
+        int idY = Mathf.RoundToInt(position.y / size.y) + startID.y;
         return new Vector2Int(idX, idY);
     }
 
     // Get the Vector2 position of the bottom-left corner of the Grid
-    public static Vector2 GetGridOrigin(Grid grid)
+    public Vector2 GetOrigin()
     {
-        float x = -size.x / 2 + grid.id.x * size.x;
-        float y = -size.y / 2 + grid.id.y * size.y;
+        float x = -size.x / 2 + (id.x - startID.x) * size.x;
+        float y = -size.y / 2 + (id.y - startID.y) * size.y;
         return new Vector2(x, y);
     }
 
     // Get the Vector2 position of the centre of the Grid
-    public static Vector2 GetGridCentre(Grid grid)
+    public Vector2 GetCentre()
     {
-        float x = grid.id.x * size.x;
-        float y = grid.id.y * size.y;
+        float x = (id.x - startID.x) * size.x;
+        float y = (id.y - startID.y) * size.y;
         return new Vector2(x, y);
     }
 
@@ -157,7 +175,7 @@ public class Grid
             for (int j = 0; j <= 1; j++)
             {
                 Vector2 offset = new Vector2(i, j);
-                corners[i, j] = GetGridOrigin(this) + offset * size;
+                corners[i, j] = GetOrigin() + offset * size;
                 Object.Instantiate(GameController.instance.gridCorner, new Vector3(corners[i, j].x, 0, corners[i, j].y), Quaternion.identity, gridMesh.transform);
             }
         }
@@ -178,111 +196,122 @@ public class Grid
     // Add a CelestialBody to the Grid, with a random size and position
     public bool AddCelestialBody()
     {
-        float newOrbitRadius = Random.Range(minCelestialBodySize, maxCelestialBodySize);
-        Vector2 newPosition = new Vector2(Random.Range(0, size.x), Random.Range(0, size.y));
+        CelestialBody newCelBody = CelestialBody.RandomBody(this, sysRand.Next());
 
-        Vector2 newCelestialBodyPosition = GetGridOrigin(this) + newPosition;
+        if (newCelBody.bodyType == CelestialBody.BodyType.BlackHole)
+        {
+            if (numBlackHoles >= maxBlackHoles)
+            {
+                // Don't exceed max black holes
+                return false;
+            }
+        }
 
-        // Check adjacent grids for overlapping celestialBody orbits before creating CelestiaBody
+        // Check adjacent grids for overlapping celestialBody orbits before creating CelestialBody
+        // If overlapping with other grid, keep larger body and destroy other body
+        // If overlapping with current grid, don't generate new body
+        List<CelestialBody> bodiesInTheWay = new List<CelestialBody>();
         for (int i = -1; i <= 1; i++)
         {
             for (int j = -1; j <= 1; j++)
             {
                 Vector2Int offset = new Vector2Int(i, j);
-                Grid currentGrid = GetGrid(id + offset);
-                if (currentGrid != null)
+                if (GridExists(id + offset))
                 {
-                    Vector2 gridOrigin = GetGridOrigin(currentGrid);
+                    MyGrid currentGrid = GetGrid(id + offset);
+                    Vector2 gridOrigin = currentGrid.GetOrigin();
                     for (int k = 0; k < currentGrid.celestialBodys.Count; k++)
                     {
                         CelestialBody existingCelestialBody = currentGrid.celestialBodys[k];
                         Vector2 existingCelestialBodyPosition = gridOrigin + existingCelestialBody.position;
-                        float existingOrbitRadius = existingCelestialBody.orbitRadius;
-                        float distance = Vector2.Distance(existingCelestialBodyPosition, newCelestialBodyPosition);
-                        bool isOverlapping = distance < (existingOrbitRadius + newOrbitRadius + celestialBodyBuffer);
+                        float existingOrbitRadius = existingCelestialBody.outerRadius;
+                        float distance = Vector2.Distance(existingCelestialBodyPosition, newCelBody.absolutePosition);
+                        bool isOverlapping = distance < (existingOrbitRadius + newCelBody.outerRadius + celestialBodyBuffer);
                         if (isOverlapping)
                         {
-                            return false;
+                            if (i == 0 && j == 0)
+                            {
+                                // Don't create in same Grid
+                                return false;
+                            }
+                            if (existingCelestialBody.absolutePosition.x > newCelBody.absolutePosition.x || existingCelestialBody == CometBehaviour.instance.firstCelestialBody || existingCelestialBody.bodyType == CelestialBody.BodyType.BlackHole)
+                            {
+                                // Don't overwite if small or if existing body is first Celestial Body, or if Black Hole
+                                return false;
+                            }
+                            else
+                            {
+                                // Debug.Log(id + ": " + existingCelestialBody.name + " vs " + newCelestialBody.name);
+                                bodiesInTheWay.Add(existingCelestialBody);
+                            }
                         }
                     }
                 }
             }
         }
 
-        GameObject newCoreObject = Object.Instantiate(GameController.instance.celestialBodyPrefab, new Vector3(newCelestialBodyPosition.x, 0, newCelestialBodyPosition.y), Quaternion.identity, gridObject.transform.Find("CelestialBodys"));
-        CelestialBody newCelestialBody = new CelestialBody(newOrbitRadius, newOrbitRadius / 3, 0, 0, 0, newPosition, newCoreObject, new PlanetRings(), this);
-
-        celestialBodys.Add(newCelestialBody);
-        newCelestialBody.coreObject.transform.Find("Orbit").localScale = new Vector3(newOrbitRadius * 2 + CelestialBody.orbitRingWidth / 2, newOrbitRadius * 2 + CelestialBody.orbitRingWidth / 2, 1);
-        newCelestialBody.coreObject.transform.Find("Body").localScale = newCelestialBody.coreObject.transform.Find("Orbit").localScale / 3;
-        newCelestialBody.coreObject.transform.Find("Body").rotation = Quaternion.Euler(90f, Random.Range(0f,180f), 0f);
-        newCelestialBody.coreObject.transform.Find("Orbit").GetComponent<MeshRenderer>().material.SetFloat("haloSize", CelestialBody.orbitRingWidth);
-
-        Material bodyMat = newCelestialBody.coreObject.transform.Find("Body").GetComponent<MeshRenderer>().material;
-
-        bodyMat.SetFloat("freqRandSeed", Random.Range(0f, 1000f));
-        bodyMat.SetFloat("posRandSeed", Random.Range(0f, 1000f));
-        bodyMat.SetFloat("stripeFrequency", Random.Range(2f, 15f));
-        bodyMat.SetFloat("noiseSize", Random.Range(0f, 1f));
-        bodyMat.SetFloat("seed", Random.Range(0f, 1000f));
-
-        bodyMat.SetColor("colour1", Random.ColorHSV(0f, 1f, 0f, 1f, 0.3f, 1f, 1f, 1f));
-        bodyMat.SetColor("colour2", Random.ColorHSV(0f, 1f, 0f, 1f, 0.3f, 1f, 1f, 1f));
-
-        // Add the rings
-        for (int i = 0; i < newCelestialBody.planetRings.numRings; i++)
+        foreach(CelestialBody celBody in bodiesInTheWay)
         {
-            GameObject newRing = Object.Instantiate(GameController.instance.ringPrefab, newCelestialBody.coreObject.transform.Find("Body").Find("Rings"));
-            Material ringMat = newRing.GetComponent<MeshRenderer>().material;
-            ringMat.SetFloat("slant", newCelestialBody.planetRings.ringSlant);
-            ringMat.SetFloat("ringStart", newCelestialBody.planetRings.ringStart + i * (newCelestialBody.planetRings.ringWidth + newCelestialBody.planetRings.gapWidth));
-            ringMat.SetFloat("ringEnd", newCelestialBody.planetRings.ringStart + (i + 1) * newCelestialBody.planetRings.ringWidth + i * newCelestialBody.planetRings.gapWidth);
-            ringMat.SetColor("colour", newCelestialBody.planetRings.ringColours[i]);
+            RemoveCelestialBody(celBody);
+        }
+
+        celestialBodys.Add(newCelBody);
+
+        if (newCelBody.bodyType == CelestialBody.BodyType.BlackHole)
+        {
+            numBlackHoles += 1;
+        }
+
+        if (isFirstBody)
+        {
+            if (!CometBehaviour.instance.enteredBlackHole && newCelBody.bodyType == CelestialBody.BodyType.StandardPlanet)
+            {
+                CometBehaviour.instance.currentGrid = this;
+                CometBehaviour.instance.firstCelestialBody = newCelBody;
+                CometBehaviour.instance.newGrid = this;
+                isFirstBody = false;
+            }
+            else if (CometBehaviour.instance.enteredBlackHole && newCelBody.bodyType == CelestialBody.BodyType.BlackHole)
+            {
+                CometBehaviour.instance.currentGrid = this;
+                CometBehaviour.instance.firstCelestialBody = newCelBody;
+                CometBehaviour.instance.newGrid = this;
+                isFirstBody = false;
+            }
         }
 
         return true;
     }
 
-    public void AddFirstCelestialBody()
+    public void RemoveCelestialBody(CelestialBody celBody)
     {
-        float newOrbitRadius = 5;
-        Vector2 newPosition = -GetGridOrigin(this);
+        GameController.instance.StartCoroutine(RemoveCelestialBodyCoroutine(celBody));
+    }
 
-        Vector2 newCelestialBodyPosition = GetGridOrigin(this) + newPosition;
-
-        GameObject newCoreObject = Object.Instantiate(GameController.instance.celestialBodyPrefab, new Vector3(newCelestialBodyPosition.x, 0, newCelestialBodyPosition.y), Quaternion.identity, gridObject.transform.Find("CelestialBodys"));
-        CelestialBody newCelestialBody = new CelestialBody(newOrbitRadius, newOrbitRadius / 3, 0, 0, 0, newPosition, newCoreObject, new PlanetRings(), this);
-
-        celestialBodys.Add(newCelestialBody);
-        newCelestialBody.coreObject.transform.Find("Orbit").localScale = new Vector3(newOrbitRadius * 2 + CelestialBody.orbitRingWidth / 2, newOrbitRadius * 2 + CelestialBody.orbitRingWidth / 2, 1);
-        newCelestialBody.coreObject.transform.Find("Body").localScale = newCelestialBody.coreObject.transform.Find("Orbit").localScale / 3;
-        newCelestialBody.coreObject.transform.Find("Body").rotation = Quaternion.Euler(90f, Random.Range(0f, 180f), 0f);
-        newCelestialBody.coreObject.transform.Find("Orbit").GetComponent<MeshRenderer>().material.SetFloat("haloSize", CelestialBody.orbitRingWidth);
-
-        Material bodyMat = newCelestialBody.coreObject.transform.Find("Body").GetComponent<MeshRenderer>().material;
-
-        bodyMat.SetFloat("freqRandSeed", Random.Range(0f, 1000f));
-        bodyMat.SetFloat("posRandSeed", Random.Range(0f, 1000f));
-        bodyMat.SetFloat("stripeFrequency", Random.Range(2f, 15f));
-        bodyMat.SetFloat("noiseSize", Random.Range(0f, 1f));
-        bodyMat.SetFloat("seed", Random.Range(0f, 1000f));
-
-        bodyMat.SetColor("colour1", Random.ColorHSV(0f, 1f, 0f, 1f, 0.3f, 1f, 1f, 1f));
-        bodyMat.SetColor("colour2", Random.ColorHSV(0f, 1f, 0f, 1f, 0.3f, 1f, 1f, 1f));
-
-        // Add the rings
-        for (int i = 0; i < newCelestialBody.planetRings.numRings; i++)
+    private IEnumerator RemoveCelestialBodyCoroutine(CelestialBody celBody)
+    {
+        waitingToRemoveBody = true;
+        while (coroutinesRunning)
         {
-            GameObject newRing = Object.Instantiate(GameController.instance.ringPrefab, newCelestialBody.coreObject.transform.Find("Body").Find("Rings"));
-            Material ringMat = newRing.GetComponent<MeshRenderer>().material;
-            ringMat.SetFloat("slant", newCelestialBody.planetRings.ringSlant);
-            ringMat.SetFloat("ringStart", newCelestialBody.planetRings.ringStart + i * (newCelestialBody.planetRings.ringWidth + newCelestialBody.planetRings.gapWidth));
-            ringMat.SetFloat("ringEnd", newCelestialBody.planetRings.ringStart + (i + 1) * newCelestialBody.planetRings.ringWidth + i * newCelestialBody.planetRings.gapWidth);
-            ringMat.SetColor("colour", newCelestialBody.planetRings.ringColours[i]);
+            yield return null;
         }
+        waitingToRemoveBody = false;
+        coroutinesRunning = true;
+        celBody.grid.celestialBodys.Remove(celBody);
+        // Debug.Log(id + ": Removed: " + celBody.name);
 
-        CometBehaviour.instance.firstCelestialBody = newCelestialBody;
-        CometBehaviour.instance.newGrid = this;
+        if (celBody.ExistsInScene())
+        {
+            //celBody.bodyObject.SetActive(false);
+            celBody.RemoveFromScene();
+            // Debug.Log(id + ": Body deact: " + celBody.name);
+        }
+        else
+        {
+            // Debug.Log(id + ": No body: " + celBody.name);
+        }
+        //Debug.Log(celBody.name);
+        coroutinesRunning = false;
     }
 
     // Generate CelestialBodys in the Grid
@@ -301,14 +330,209 @@ public class Grid
             {
                 currentGenAttempts += 1;
             }
+            //yield return null;
         }
         if (currentGenAttempts >= maxGenAttempts)
         {
-            Debug.Log("Max attempts reached for Grid " + id + "\n");
+            //Debug.Log("Max attempts reached for Grid " + id + "\n");
         }
         else if (currentCelestialBodys >= maxCelestialBodys)
         {
-            Debug.Log("Max celestialBodys generated for Grid " + id + "\n");
+            //Debug.Log("Max celestialBodys generated for Grid " + id + "\n");
         }
+    }
+
+    public void CreateInScene()
+    {
+        if (!gridsInSceneIDs.Contains(id))
+        {
+            GameController.instance.StartCoroutine(CreateInSceneCouroutine());
+        }
+        else
+        {
+            ActivateInScene(true);
+        }
+    }
+
+    public void RemoveFromScene()
+    {
+        if (gridsInSceneIDs.Contains(id))
+        {
+            Object.Destroy(gridObject);
+            gridsInSceneIDs.Remove(id);
+        }
+    }
+
+    private IEnumerator CreateInSceneCouroutine()
+    {
+        gridsInSceneIDs.Add(id);
+        isActiveInScene = true;
+        waitingToCreateGrid = true;
+        while (coroutinesRunning || waitingToRemoveBody)
+        {
+            yield return null;
+        }
+        waitingToCreateGrid = false;
+        coroutinesRunning = true;
+        // Debug.Log("Started: " + id + " creation.");
+        int maxSeed = GameController.instance.maxSeed;
+
+        gridObject = Object.Instantiate(GameController.instance.gridPrefab, GameController.instance.grids.transform);
+        gridObject.name = "" + id;
+        gridObject.transform.position = new Vector3(GetCentre().x, GameController.instance.celestialBodyLayer, GetCentre().y);
+
+        // Add the stars background
+        numStars = sysRand.Next(10, 100);
+        Vector3 starPos;
+        for (int i = 0; i < numStars; i++)
+        {
+            starPos = new Vector3(((float)sysRand.NextDouble() - 0.5f) * size.x, GameController.instance.starLayer, ((float)sysRand.NextDouble() - 0.5f) * size.y); ;
+            GameObject newStar = Object.Instantiate(GameController.instance.starPrefab, gridObject.transform.position + starPos, Quaternion.Euler(90, 0, 0), gridObject.transform.Find("Stars"));
+            Material newStarMat = newStar.GetComponent<MeshRenderer>().material;
+            newStarMat.SetFloat("seed", sysRand.Next(0, maxSeed));
+            float h = (float)sysRand.NextDouble();
+            float s = (float)sysRand.NextDouble() * 0.3f;
+            float v = 1;
+            newStarMat.SetColor("colour", Color.HSVToRGB(h, s, v));
+        }
+
+        // Optionally add some nebulae
+        int numNebulae = sysRand.Next(0, 4);
+        Vector3 nebulaPosition = gridObject.transform.position + new Vector3(((float)sysRand.NextDouble() - 0.5f) * size.x, GameController.instance.nebulaLayer, ((float)sysRand.NextDouble() - 0.5f) * size.y);
+        Quaternion nebulaRotation;
+        for (int i = 0; i < numNebulae; i++)
+        {
+            nebulaPosition -= new Vector3(0, 0.01f, 0);
+            nebulaRotation = Quaternion.Euler(90, 0, (float)sysRand.NextDouble() * 360);
+            GameObject nebulae = Object.Instantiate(GameController.instance.nebulaCloud, nebulaPosition, nebulaRotation, gridObject.transform.Find("Nebulae"));
+            nebulae.transform.localScale = new Vector3(40, 40);
+            Material nebulaeMat = nebulae.GetComponent<MeshRenderer>().material;
+            nebulaeMat.SetFloat("seed", sysRand.Next(0, maxSeed));
+            nebulaeMat.SetFloat("brightness", (float)sysRand.NextDouble());
+            float h = (float)sysRand.NextDouble();
+            float s = 1 - (float)sysRand.NextDouble() * (1 - 0.5f);
+            float v = 1;
+            nebulaeMat.SetColor("colour", Color.HSVToRGB(h, s, v));
+            nebulaeMat.SetTexture("cloudTexture", GameController.instance.cloudTexture);
+        }
+
+        // Add the black background
+        Transform background = Object.Instantiate(GameController.instance.blackBackground, gridObject.transform).transform;
+        background.position += new Vector3(0, GameController.instance.backgroundLayer, 0);
+        background.localScale = new Vector3(size.x, size.y, 1);
+
+        // Add the bodies
+        for (int i = 0; i < celestialBodys.Count; i++)
+        {
+            celestialBodys[i].CreateInScene();
+            yield return null;
+        }
+
+        // GenerateGridMesh();
+
+        coroutinesRunning = false;
+    }
+
+    public static MyGrid GenerateGridAndCreateInScene(Vector2Int id)
+    {
+        MyGrid newGrid = GenerateGrid(id);
+        newGrid.CreateInScene();
+        return newGrid;
+    }
+
+    public static MyGrid GenerateGrid(Vector2Int id)
+    {
+        if (GridExists(id))
+        {
+            return GetGrid(id);
+        }
+        else
+        {
+            return new MyGrid(id);
+        }
+    }
+
+    public MyGrid NextGrid()
+    {
+        return GenerateGrid(nextID);
+    }
+
+    public MyGrid NextGridWithBlackHole()
+    {
+        MyGrid nextGrid = GenerateGrid(nextID);
+        for (int i = 0; i < 100; i++)
+        {
+            if (nextGrid.FirstBlackHole() != null)
+            {
+                Debug.Log(nextGrid.id);
+                return nextGrid;
+            }
+            Debug.Log("Not " + nextGrid.id);
+            nextGrid = nextGrid.NextGrid();
+        }
+        Debug.Log("Really? 100 in a row with no Black Hole?");
+        return null;
+    }
+
+    public void ActivateInScene(bool activate)
+    {
+        if (gridObject != null)
+        {
+            gridObject.SetActive(activate);
+            isActiveInScene = activate;
+            //Debug.Log(id + " " + (activate ? "" : "de") + "activated");
+        }
+        else
+        {
+            Debug.Log("Grid object " + id + " not yet created.");
+            GameController.instance.StartCoroutine(ActivateInSceneCoroutine(activate));
+        }
+    }
+
+    public IEnumerator ActivateInSceneCoroutine(bool activate)
+    {
+        float time = 0;
+        while (gridObject == null && time < 2)
+        {
+            time += Time.deltaTime;
+            yield return null;
+        }
+        if (gridObject != null)
+        {
+            Debug.Log((activate ? "" : "De") + "activation for " + id + " successful.");
+            ActivateInScene(activate);
+        }
+        else
+        {
+            Debug.Log(activate ? "" : "De" + "activation for " + id + " failed.");
+        }
+
+    }
+
+    public static bool GridExists(Vector2Int id)
+    {
+        return allGrids.FirstOrDefault(o => o.id == id) != null;
+    }
+
+    public CelestialBody FirstBlackHole()
+    {
+        return celestialBodys.FirstOrDefault(o => o.bodyType == CelestialBody.BodyType.BlackHole);
+    }
+
+    public static void ClearAllGrids()
+    {
+        coroutinesRunning = false;
+        foreach(Transform child in GameController.instance.grids.transform)
+        {
+            Object.Destroy(child.gameObject);
+        }
+        allGrids = new List<MyGrid>();
+        gridsInSceneIDs = new List<Vector2Int>();
+        isFirstBody = true;
+    }
+
+    public void RemoveGridFromMemory()
+    {
+
     }
 }
